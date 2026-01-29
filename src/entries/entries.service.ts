@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { subDays, startOfDay, endOfDay, format } from 'date-fns';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEntryDto } from './dto/create-entry.dto';
 import { UpdateEntryDto } from './dto/update-entry.dto';
@@ -7,9 +8,7 @@ import { UpdateEntryDto } from './dto/update-entry.dto';
 export class EntriesService {
   constructor(private prisma: PrismaService) {}
 
-  // CRIAR NOVO REGISTRO
   async create(createEntryDto: CreateEntryDto) {
-    // 1. Verificar se o usuário existe
     const userExists = await this.prisma.user.findUnique({
       where: { id: createEntryDto.userId },
     });
@@ -20,10 +19,8 @@ export class EntriesService {
       );
     }
 
-    // 2. Calcular netAmount
     const netAmount = createEntryDto.grossAmount - createEntryDto.expenses;
 
-    // 3. Criar a entrada
     return this.prisma.entry.create({
       data: {
         date: new Date(createEntryDto.date),
@@ -36,7 +33,6 @@ export class EntriesService {
     });
   }
 
-  // LISTAR TODOS OS REGISTROS (com filtros)
   async findAll(userId?: string, skip?: number, take?: number) {
     const where = userId ? { userId } : {};
 
@@ -70,7 +66,6 @@ export class EntriesService {
     };
   }
 
-  // BUSCAR POR ID
   async findOne(id: string) {
     const entry = await this.prisma.entry.findUnique({
       where: { id },
@@ -92,12 +87,9 @@ export class EntriesService {
     return entry;
   }
 
-  // ATUALIZAR REGISTRO
   async update(id: string, updateEntryDto: UpdateEntryDto) {
-    // Verifica se existe
     await this.findOne(id);
 
-    // Cria objeto de dados com tipo explícito
     const data: any = { ...updateEntryDto };
 
     if (updateEntryDto.date) {
@@ -108,7 +100,6 @@ export class EntriesService {
       updateEntryDto.grossAmount !== undefined ||
       updateEntryDto.expenses !== undefined
     ) {
-      // Busca valores atuais para calcular
       const current = await this.prisma.entry.findUnique({
         where: { id },
         select: { grossAmount: true, expenses: true },
@@ -133,18 +124,14 @@ export class EntriesService {
     });
   }
 
-  // REMOVER REGISTRO
   async remove(id: string) {
-    await this.findOne(id); // Verifica se existe
+    await this.findOne(id);
 
     return this.prisma.entry.delete({
       where: { id },
     });
   }
 
-  // ========== RELATÓRIOS ==========
-
-  // RESUMO SEMANAL
   async getWeeklySummary(userId: string, startDate: Date, endDate: Date) {
     const entries = await this.prisma.entry.findMany({
       where: {
@@ -169,7 +156,6 @@ export class EntriesService {
       { totalGross: 0, totalExpenses: 0, totalNet: 0 },
     );
 
-    // Agrupar por dia da semana
     const byDayOfWeek = entries.reduce((acc, entry) => {
       if (!acc[entry.dayOfWeek]) {
         acc[entry.dayOfWeek] = {
@@ -198,15 +184,13 @@ export class EntriesService {
     };
   }
 
-  // RESUMO MENSAL
   async getMonthlySummary(userId: string, year: number, month: number) {
     const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0); // Último dia do mês
+    const endDate = new Date(year, month, 0);
 
     return this.getWeeklySummary(userId, startDate, endDate);
   }
 
-  // ESTATÍSTICAS GERAIS DO USUÁRIO
   async getUserStats(userId: string) {
     const [totalEntries, sums, averages] = await Promise.all([
       this.prisma.entry.count({ where: { userId } }),
@@ -230,7 +214,6 @@ export class EntriesService {
       }),
     ]);
 
-    // Melhor dia (maior líquido)
     const bestDay = await this.prisma.entry.findFirst({
       where: { userId },
       orderBy: { netAmount: 'desc' },
@@ -243,7 +226,6 @@ export class EntriesService {
       },
     });
 
-    // Pior dia (menor líquido)
     const worstDay = await this.prisma.entry.findFirst({
       where: { userId },
       orderBy: { netAmount: 'asc' },
@@ -273,7 +255,6 @@ export class EntriesService {
     };
   }
 
-  // ÚLTIMOS DIAS DE TRABALHO
   async getRecentEntries(userId: string, limit: number = 7) {
     return this.prisma.entry.findMany({
       where: { userId },
@@ -291,7 +272,6 @@ export class EntriesService {
     });
   }
 
-  // src/entries/entries.service.ts
   async getUserStatsFiltered(
     userId: string,
     startDate?: string,
@@ -373,5 +353,135 @@ export class EntriesService {
       'sábado',
     ];
     return days[date.getDay()];
+  }
+
+  async getDayDetails(date: Date, userId?: string) {
+    // Ajustar datas para início e fim do dia
+    const startDate = startOfDay(date);
+    const endDate = endOfDay(date);
+
+    // Construir filtro
+    const where: any = {
+      date: {
+        gte: startDate,
+        lte: endDate,
+      },
+    };
+
+    if (userId) {
+      where.userId = userId;
+    }
+
+    const entries = await this.prisma.entry.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (entries.length === 0) {
+      return null;
+    }
+
+    const totalGrossAmount = entries.reduce(
+      (sum, entry) => sum + entry.grossAmount,
+      0,
+    );
+    const totalExpenses = entries.reduce(
+      (sum, entry) => sum + entry.expenses,
+      0,
+    );
+    const totalNetAmount = totalGrossAmount - totalExpenses;
+
+    const descriptions = entries
+      .filter((entry) => entry.description)
+      .map((entry) => entry.description)
+      .join(', ');
+
+    return {
+      date: format(date, 'yyyy-MM-dd'),
+      totalGrossAmount,
+      totalExpenses,
+      totalNetAmount,
+      description: descriptions || undefined,
+      entriesCount: entries.length,
+      entries: entries.map((entry) => ({
+        id: entry.id,
+        date: entry.date,
+        dayOfWeek: entry.dayOfWeek,
+        grossAmount: entry.grossAmount,
+        expenses: entry.expenses,
+        netAmount: entry.netAmount,
+        description: entry.description,
+        userId: entry.userId,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+      })),
+    };
+  }
+
+  async getRecentDaysSummary(days: number = 7, userId?: string) {
+    const hoje = new Date();
+    const resultados = [];
+
+    // Para cada dia, buscar resumo
+    for (let i = 0; i < days; i++) {
+      const data = subDays(hoje, i);
+      const startOfTheDay = startOfDay(data);
+      const endOfTheDay = endOfDay(data);
+      const dateString = format(data, 'yyyy-MM-dd');
+
+      // Construir filtro
+      const where: any = {
+        date: {
+          gte: startOfTheDay,
+          lte: endOfTheDay,
+        },
+      };
+
+      if (userId) {
+        where.userId = userId;
+      }
+
+      const entries = await this.prisma.entry.findMany({
+        where,
+      });
+
+      if (entries.length > 0) {
+        const totalGrossAmount = entries.reduce(
+          (sum, entry) => sum + entry.grossAmount,
+          0,
+        );
+        const totalExpenses = entries.reduce(
+          (sum, entry) => sum + entry.expenses,
+          0,
+        );
+        const totalNetAmount = totalGrossAmount - totalExpenses;
+
+        resultados.push({
+          date: dateString,
+          dayOfWeek: format(data, 'EEEE'),
+          dayOfWeekShort: format(data, 'EEE'),
+          totalGrossAmount,
+          totalExpenses,
+          totalNetAmount,
+          entriesCount: entries.length,
+          hasEntries: true,
+          previewDescription: entries[0]?.description || undefined,
+        });
+      } else {
+        resultados.push({
+          date: dateString,
+          dayOfWeek: format(data, 'EEEE'),
+          dayOfWeekShort: format(data, 'EEE'),
+          totalGrossAmount: 0,
+          totalExpenses: 0,
+          totalNetAmount: 0,
+          entriesCount: 0,
+          hasEntries: false,
+          previewDescription: undefined,
+        });
+      }
+    }
+
+    return resultados;
   }
 }

@@ -11,7 +11,9 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
+import { format, isValid } from 'date-fns';
 import { EntriesService } from './entries.service';
 import { CreateEntryDto } from './dto/create-entry.dto';
 import { UpdateEntryDto } from './dto/update-entry.dto';
@@ -112,14 +114,27 @@ export class EntriesController {
 
   @Get('day/details')
   async getDayDetails(
-    @Query('date') date: Date,
+    @Query('date') dateParam: string,
     @Query('userId') userId?: string,
   ) {
+    // Validar e converter a string para Date
+    if (!dateParam) {
+      throw new BadRequestException('Date parameter is required');
+    }
+
+    const date = new Date(dateParam);
+
+    if (!isValid(date)) {
+      throw new BadRequestException(
+        `Invalid date format. Please use YYYY-MM-DD format. Received: ${dateParam}`,
+      );
+    }
+
     const dayDetails = await this.entriesService.getDayDetails(date, userId);
 
     if (!dayDetails) {
       throw new NotFoundException(
-        `Nenhum registro encontrado para a data ${date.toISOString().split('T')[0]}`,
+        `Nenhum registro encontrado para a data ${format(date, 'yyyy-MM-dd')}`,
       );
     }
 
