@@ -27,6 +27,7 @@ export class EntriesService {
         dayOfWeek: createEntryDto.dayOfWeek,
         grossAmount: createEntryDto.grossAmount,
         expenses: createEntryDto.expenses,
+        description: createEntryDto.description,
         netAmount: netAmount,
         userId: userExists.id,
       },
