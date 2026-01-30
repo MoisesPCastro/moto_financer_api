@@ -117,24 +117,26 @@ export class EntriesController {
     @Query('date') dateParam: string,
     @Query('userId') userId?: string,
   ) {
-    // Validar e converter a string para Date
     if (!dateParam) {
       throw new BadRequestException('Date parameter is required');
     }
 
-    const date = new Date(dateParam);
+    // ✅ parse manual (timezone-safe)
+    const [year, month, day] = dateParam.split('-').map(Number);
 
-    if (!isValid(date)) {
+    if (!year || !month || !day) {
       throw new BadRequestException(
-        `Invalid date format. Please use YYYY-MM-DD format. Received: ${dateParam}`,
+        `Invalid date format. Please use YYYY-MM-DD. Received: ${dateParam}`,
       );
     }
+
+    const date = new Date(year, month - 1, day);
 
     const dayDetails = await this.entriesService.getDayDetails(date, userId);
 
     if (!dayDetails) {
       throw new NotFoundException(
-        `Nenhum registro encontrado para a data ${format(date, 'yyyy-MM-dd')}`,
+        `Nenhum registro encontrado para a data ${dateParam}`,
       );
     }
 
